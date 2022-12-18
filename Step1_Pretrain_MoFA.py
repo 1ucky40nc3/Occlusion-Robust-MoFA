@@ -49,17 +49,17 @@ def main():
     parser.add_argument(
         "--pretrained_model_train", default=000, type=int, help="Pretrained model"
     )
-    parser.add_argument("--img_path", type=str, help="Root of the training samples")
+    parser.add_argument("--img_path", type=message, help="Root of the training samples")
     parser.add_argument(
         "--wandb_project",
         default="Occlusion-Robust_MoFA",
-        type=str,
+        type=message,
         help="The name of the wandb project",
     )
     parser.add_argument(
         "--wandb_job_type",
         default=None,
-        type=str,
+        type=message,
         help="The wandb job type description",
     )
 
@@ -342,11 +342,8 @@ def main():
     start = time.time()
     mean_losses = torch.zeros([5])
 
-    def count_parameters(model):
-        return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
     for _ in tqdm(0, epoch, desc="epochs"):
-        with tqdm(enumerate(trainloader, 0), desc="batches", leave=False) as iterator:
+        with tqdm(trainloader, desc="batches", leave=False) as iterator:
             for data in iterator:
                 if (ct - ct_begin) % 500 == 0:
                     """-------------------------
@@ -414,11 +411,11 @@ def main():
                                 ) = proc(image, landmark, True)
                                 mean_test_losses += losses_return_
                         mean_test_losses = mean_test_losses / c_test
-                        str = "test loss:{}".format(ct)
+                        message = "test loss:{}".format(ct)
                         for loss_temp in losses_return_:
-                            str += " {:05f}".format(loss_temp)
-                        logger.info(str)
-                        writer_test.writerow(str)
+                            message += " {:05f}".format(loss_temp)
+                        logger.info(message)
+                        writer_test.writerow(message)
                         logger.info("Finished validation!")
 
                     fid_train.close()
