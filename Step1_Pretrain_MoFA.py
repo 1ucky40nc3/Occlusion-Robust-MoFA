@@ -17,6 +17,8 @@ from datetime import date
 import torch
 import torch.optim as optim
 
+from tqdm import tqdm, trange
+
 import wandb
 
 from facenet_pytorch import InceptionResnetV1
@@ -94,8 +96,8 @@ def main():
     decay_rate_gamma = 0.99
 
     """------------------------------------
-	Prepare Log Files & Load Models
-	------------------------------------"""
+    Prepare Log Files & Load Models
+    ------------------------------------"""
 
     # prepare log file
     today = date.today()
@@ -153,8 +155,8 @@ def main():
     sh_ini = sh_ini.reshape(-1)
 
     """--------------------------
-	Load Dataset & Networks
-	--------------------------"""
+    Load Dataset & Networks
+    --------------------------"""
 
     trainset = load_dataset.CelebDataset(device, image_path, True, height, width, 1)
     trainset.shuffle()
@@ -181,8 +183,8 @@ def main():
     net_recog = net_recog.to(device)
     assert net_recog.training == False
     """----------------------------------
-	Fixed Testing Images for Observation
-	----------------------------------"""
+    Fixed Testing Images for Observation
+    ----------------------------------"""
     test_input_images = []
     test_landmarks = []
     for i_test, data_test in enumerate(testloader, 0):
@@ -218,8 +220,8 @@ def main():
         return -lh, occlusionForegroundMask
 
     """-------------
-	Network Forward
-	-------------"""
+    Network Forward
+    -------------"""
 
     def proc(images, landmarks, render_mode):
         """
@@ -310,8 +312,8 @@ def main():
     #################################################################
 
     """-----------------------------------------
-	load pretrained model and continue training
-	-----------------------------------------"""
+    load pretrained model and continue training
+    -----------------------------------------"""
 
     if ct != 0:
         trained_model_path = output_path + "enc_net_{:06d}.model".format(ct)
@@ -330,8 +332,8 @@ def main():
         learning_rate_begin = begin_learning_rate
 
     """----------
-	Set Optimizer
-	----------"""
+    Set Optimizer
+    ----------"""
     optimizer = optim.Adadelta(enc_net.parameters(), lr=learning_rate_begin)
     scheduler = torch.optim.lr_scheduler.StepLR(
         optimizer, step_size=decay_step_size, gamma=decay_rate_gamma
@@ -343,122 +345,139 @@ def main():
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    for ep in range(0, epoch):
-        for i, data in enumerate(trainloader, 0):
+    for _ in tqdm(0, epoch, desc="epochs"):
+        with tqdm(enumerate(trainloader, 0), desc="batches", leave=False) as iterator:
+            for data in iterator:
+                if (ct - ct_begin) % 500 == 0:
+                    """-------------------------
+                    Save Model every 5000 iters
+                    --------------------------"""
+                    if (ct - ct_begin) % 5000 == 0 and ct > ct_begin:
+                        enc_net.eval()
+                        model_name = "enc_net_{:06d}.model".format(ct)
+                        torch.save(enc_net, output_path + model_name)
+                        logger.info(f"Saved model: {model_name}")
 
-            if (ct - ct_begin) % 500 == 0:
-                """-------------------------
-                Save Model every 5000 iters
-                --------------------------"""
-                if (ct - ct_begin) % 5000 == 0 and ct > ct_begin:
+                    """-------------------------
+                    Save images for observation
+                    --------------------------"""
+                    test_raster_images = []
+                    test_fg_masks = []
                     enc_net.eval()
-                    torch.save(enc_net, output_path + "enc_net_{:06d}.model".format(ct))
+                    with torch.no_grad():
 
-                """-------------------------
-				Save images for observation
-				--------------------------"""
-                test_raster_images = []
-                test_fg_masks = []
-                enc_net.eval()
-                with torch.no_grad():
+                        for images, landmarks in zip(
+                            test_input_images, test_landmarks
+                        ):  # , test_valid_masks):
 
-                    for images, landmarks in zip(
-                        test_input_images, test_landmarks
-                    ):  # , test_valid_masks):
+                            _, _, raster_image, raster_mask, fg_mask = proc(
+                                images, landmarks, True
+                            )
 
-                        l_loss_, _, raster_image, raster_mask, fg_mask = proc(
-                            images, landmarks, True
+                            test_raster_images += [
+                                images * (1 - raster_mask.unsqueeze(1))
+                                + raster_image * raster_mask.unsqueeze(1)
+                            ]
+                            test_fg_masks += [fg_mask.unsqueeze(1)]
+                        util.write_tiled_image(
+                            torch.cat(test_raster_images, dim=0),
+                            output_path + "test_image_{}.png".format(ct),
+                            10,
                         )
+                        util.write_tiled_image(
+                            torch.cat(test_fg_masks, dim=0),
+                            output_path + "test_image_fgmask_{}.png".format(ct),
+                            10,
+                        )
+                        logger.info("Generated new test images")
 
-                        test_raster_images += [
-                            images * (1 - raster_mask.unsqueeze(1))
-                            + raster_image * raster_mask.unsqueeze(1)
-                        ]
-                        test_fg_masks += [fg_mask.unsqueeze(1)]
-                    util.write_tiled_image(
-                        torch.cat(test_raster_images, dim=0),
-                        output_path + "test_image_{}.png".format(ct),
-                        10,
-                    )
-                    util.write_tiled_image(
-                        torch.cat(test_fg_masks, dim=0),
-                        output_path + "test_image_fgmask_{}.png".format(ct),
-                        10,
-                    )
+                    # validating
+                    """-------------------------
+                    Validate Model every 1000 iters
+                    --------------------------"""
+                    if (ct - ct_begin) % 5000 == 0 and ct > ct_begin:
+                        logger.info("Starting validation...")
+                        c_test = 0
+                        mean_test_losses = torch.zeros([5])
+                        enc_net.eval()
+                        for i_test, data_test in enumerate(testloader, 0):
 
-                # validating
+                            image, landmark = data_test
+                            c_test += 1
+                            with torch.no_grad():
+                                (
+                                    _,
+                                    losses_return_,
+                                    raster_image,
+                                    raster_mask,
+                                    fg_mask,
+                                ) = proc(image, landmark, True)
+                                mean_test_losses += losses_return_
+                        mean_test_losses = mean_test_losses / c_test
+                        str = "test loss:{}".format(ct)
+                        for loss_temp in losses_return_:
+                            str += " {:05f}".format(loss_temp)
+                        logger.info(str)
+                        writer_test.writerow(str)
+                        logger.info("Finished validation!")
+
+                    fid_train.close()
+                    fid_train = open(loss_log_path_train, "a")
+                    writer_train = csv.writer(fid_train, lineterminator="\r\n")
+
+                    fid_test.close()
+                    fid_test = open(loss_log_path_test, "a")
+                    writer_test = csv.writer(fid_test, lineterminator="\r\n")
+
                 """-------------------------
-				Vlidate Model every 1000 iters
-				--------------------------"""
-                if (ct - ct_begin) % 5000 == 0 and ct > ct_begin:
-                    logger.info("Training mode:" + output_name)
-                    c_test = 0
-                    mean_test_losses = torch.zeros([5])
-                    enc_net.eval()
-                    for i_test, data_test in enumerate(testloader, 0):
+                Model Training
+                --------------------------"""
+                enc_net.train()
+                optimizer.zero_grad()
 
-                        image, landmark = data_test
-                        c_test += 1
-                        with torch.no_grad():
-                            (
-                                loss_,
-                                losses_return_,
-                                raster_image,
-                                raster_mask,
-                                fg_mask,
-                            ) = proc(image, landmark, True)
-                            mean_test_losses += losses_return_
-                    mean_test_losses = mean_test_losses / c_test
-                    str = "test loss:{}".format(ct)
-                    for loss_temp in losses_return_:
-                        str += " {:05f}".format(loss_temp)
-                    logger.info(str)
-                    writer_test.writerow(str)
+                images, landmarks = data
 
-                fid_train.close()
-                fid_train = open(loss_log_path_train, "a")
-                writer_train = csv.writer(fid_train, lineterminator="\r\n")
+                loss, losses_return_, raster_image, raster_mask, fg_mask = proc(
+                    images, landmarks, False
+                )
+                if images.shape[0] != batch:
+                    continue
+                mean_losses += losses_return_
+                loss.backward()
+                optimizer.step()
 
-                fid_test.close()
-                fid_test = open(loss_log_path_test, "a")
-                writer_test = csv.writer(fid_test, lineterminator="\r\n")
+                """-------------------------
+                Show Training Loss
+                --------------------------"""
 
-            """-------------------------
-			Model Training
-			--------------------------"""
-            enc_net.train()
-            optimizer.zero_grad()
+                if (ct - ct_begin) % 100 == 0 and (ct - ct_begin) > 0:
+                    end = time.time()
+                    mean_losses = mean_losses / 100
+                    mean_losses_dict = {
+                        "loss": mean_losses[0],
+                        "land_loss": mean_losses[1],
+                        "rec_loss": mean_losses[2],
+                        "stat_reg": mean_losses[3],
+                        "perceptual_loss": mean_losses[4],
+                    }
+                    message = ", ".join(
+                        f"{name}: {value:.05f}"
+                        for name, value in mean_losses_dict.items()
+                    )
+                    message += ", time: {:01f}".format(end - start)
+                    logger.info(message)
+                    writer_train.writerow(message)
+                    iterator.set_postfix(mean_losses_dict)
+                    wandb.log(mean_losses_dict)
+                    start = end
+                    mean_losses = torch.zeros([5])
 
-            images, landmarks = data
+                scheduler.step()
+                ct += 1
 
-            loss, losses_return_, raster_image, raster_mask, fg_mask = proc(
-                images, landmarks, False
-            )
-            if images.shape[0] != batch:
-                continue
-            mean_losses += losses_return_
-            loss.backward()
-            optimizer.step()
-
-            """-------------------------
-			Show Training Loss
-			--------------------------"""
-
-            if (ct - ct_begin) % 100 == 0 and (ct - ct_begin) > 0:
-                end = time.time()
-                mean_losses = mean_losses / 100
-                str = "train loss:{}".format(ct)
-                for loss_temp in mean_losses:
-                    str += " {:05f}".format(loss_temp)
-                str += " time: {:01f}".format(end - start)
-                logger.info(str)
-                writer_train.writerow(str)
-                start = end
-                mean_losses = torch.zeros([5])
-            scheduler.step()
-            ct += 1
-
-    torch.save(enc_net, output_path + "enc_net_{:06d}.model".format(ct))
+    model_name = "enc_net_{:06d}.model".format(ct)
+    torch.save(enc_net, output_path + model_name)
+    logger.info(f"Saved final model: {model_name}")
 
 
 if __name__ == "__main__":
