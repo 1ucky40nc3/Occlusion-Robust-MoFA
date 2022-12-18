@@ -342,7 +342,7 @@ def main():
     start = time.time()
     mean_losses = torch.zeros([5])
 
-    for _ in tqdm(0, epoch, desc="epochs"):
+    for _ in trange(0, epoch, desc="epochs"):
         with tqdm(trainloader, desc="batches", leave=False) as iterator:
             for data in iterator:
                 if (ct - ct_begin) % 500 == 0:
