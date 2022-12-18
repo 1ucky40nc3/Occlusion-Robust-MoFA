@@ -12,3 +12,4 @@ scipy
 torchvision==0.8.2
 scikit-image
 kornia
+wandb

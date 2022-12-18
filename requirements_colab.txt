@@ -1,0 +1,4 @@
+facenet-pytorch
+menpo
+kornia
+wandb
