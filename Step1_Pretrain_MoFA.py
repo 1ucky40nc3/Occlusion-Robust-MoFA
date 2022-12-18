@@ -49,17 +49,17 @@ def main():
     parser.add_argument(
         "--pretrained_model_train", default=000, type=int, help="Pretrained model"
     )
-    parser.add_argument("--img_path", type=message, help="Root of the training samples")
+    parser.add_argument("--img_path", type=str, help="Root of the training samples")
     parser.add_argument(
         "--wandb_project",
         default="Occlusion-Robust_MoFA",
-        type=message,
+        type=str,
         help="The name of the wandb project",
     )
     parser.add_argument(
         "--wandb_job_type",
         default=None,
-        type=message,
+        type=str,
         help="The wandb job type description",
     )
 
