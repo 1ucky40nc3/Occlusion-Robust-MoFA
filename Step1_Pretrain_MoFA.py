@@ -6,31 +6,30 @@ Full-face version with 68 3D landmarks
 WITH Perceptual Loss
 @author: root
 """
-import torch
-import math
-import torch.optim as optim
-import util.util as util
+import os
 import csv
+import time
+import math
+import logging
+import argparse
+from datetime import date
+
+import torch
+import torch.optim as optim
+
+import wandb
+
+from facenet_pytorch import InceptionResnetV1
+
+import util.util as util
 import util.load_dataset as load_dataset
 import util.load_object as lob
 import renderer.rendering as ren
 import encoder.encoder as enc
-import time
-import os
-import argparse
-from datetime import date
-from facenet_pytorch import InceptionResnetV1
 from models import networks
-
-import logging
-
-import wandb
 
 
 logger = logging.getLogger(__name__)
-
-
-logger.info(networks.__file__)
 
 
 def main():
